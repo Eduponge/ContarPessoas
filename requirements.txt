@@ -1,0 +1,6 @@
+ultralytics
+opencv-python
+mss
+numpy
+scikit-image
+filterpy

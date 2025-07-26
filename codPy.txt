@@ -1,0 +1,42 @@
+from ultralytics import YOLO
+import cv2
+import mss
+import numpy as np
+from datetime import datetime
+import os
+
+# Caminho do modelo na mesma pasta do script/executável
+base_dir = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(base_dir, 'yolov8n.pt')
+model = YOLO(model_path)
+
+start_time = datetime.now().strftime('%H:%M:%S')
+
+with mss.mss() as sct:
+    monitor = sct.monitors[1]  # Captura a tela principal
+
+    while True:
+        sct_img = sct.grab(monitor)
+        frame = np.array(sct_img)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+        results = model(frame)
+        count = 0
+
+        for box in results[0].boxes:
+            cls = int(box.cls[0])
+            if results[0].names[cls] == 'person':
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                count += 1
+
+        cv2.putText(frame, f"Pessoas na tela: {count}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(frame, f"Inicio: {start_time}", (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 128, 255), 2)
+
+        cv2.imshow('Contador de Pessoas na Tela', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+cv2.destroyAllWindows()

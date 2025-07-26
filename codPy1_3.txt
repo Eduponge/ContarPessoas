@@ -1,0 +1,94 @@
+from ultralytics import YOLO
+import cv2
+import mss
+import numpy as np
+from datetime import datetime
+import os
+import sys
+from sort import Sort  # sort.py deve estar na mesma pasta
+
+# Caminho do modelo compatível com .exe
+if getattr(sys, 'frozen', False):
+    base_dir = os.path.dirname(sys.executable)
+else:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+model_path = os.path.join(base_dir, 'yolov8n.pt')
+model = YOLO(model_path)
+
+# Margens e tempo mínimo de presença
+margem_superior = 50
+margem_inferior = 50
+margem_esquerda = 50
+margem_direita = 50
+tempo_minimo = 60  # Frames necessários para ser contado
+
+tracker = Sort()
+pessoas_vistas = set()
+tempo_presenca = {}  # {id: contagem de frames}
+start_time = datetime.now().strftime('%H:%M:%S')
+
+with mss.mss() as sct:
+    monitor = sct.monitors[1]
+
+    while True:
+        sct_img = sct.grab(monitor)
+        frame = np.array(sct_img)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+        results = model(frame)
+        h, w = frame.shape[:2]
+        detections = []
+
+        for box in results[0].boxes:
+            cls = int(box.cls[0])
+            if results[0].names[cls] == 'person':
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                conf = float(box.conf[0])
+                detections.append([x1, y1, x2, y2, conf])
+
+        dets_np = np.array(detections)
+
+        if dets_np.shape[0] > 0:
+            tracks = tracker.update(dets_np)
+        else:
+            tracks = np.empty((0, 5))
+
+        pessoas_frame = 0
+
+        for track in tracks:
+            x1, y1, x2, y2, track_id = map(int, track)
+            dentro_da_area = (
+                x1 > margem_esquerda and x2 < w - margem_direita and
+                y1 > margem_superior and y2 < h - margem_inferior
+            )
+
+            if dentro_da_area:
+                pessoas_frame += 1
+                tempo_presenca[track_id] = tempo_presenca.get(track_id, 0) + 1
+
+                # Só registra se atingiu tempo mínimo
+                if tempo_presenca[track_id] == tempo_minimo:
+                    pessoas_vistas.add(track_id)
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, f"ID:{track_id} ({tempo_presenca[track_id]})", (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        # Área de contagem
+        cv2.rectangle(frame, (margem_esquerda, margem_superior),
+                      (w - margem_direita, h - margem_inferior), (255, 0, 0), 2)
+
+        # Informações na tela
+        cv2.putText(frame, f"Pessoas no frame: {pessoas_frame}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        cv2.putText(frame, f"Total únicas confirmadas: {len(pessoas_vistas)}", (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+        cv2.putText(frame, f"Início: {start_time}", (10, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 128, 255), 2)
+
+        cv2.imshow('Contador de Pessoas Inteligente', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+cv2.destroyAllWindows()
